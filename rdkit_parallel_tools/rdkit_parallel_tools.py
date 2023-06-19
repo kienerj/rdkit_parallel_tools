@@ -48,9 +48,17 @@ def raw_sd_reader(file) -> Iterable[str]:
             data = []
     file.close()
 
+
 def chunked_raw_sd_reader(file, num_mols: int = 100) -> Iterable[str]:
     """
-    Read a sd-file but return only raw sd-data as string in chunks of "num_mols"
+    Read a sd-file but return only raw sd-data as string in chunks of "num_mols".
+
+    When using multiprocessing, it's preferably to send the raw molecule data in chunks to each worker and have the
+    workers generate the molecules from the "sd-blocks". This is easy with SMILES (one molecule per line) and this is
+    simply a helper function to also make this easy when the source is a sd-file.
+
+    Code taken from below blog post from Noel O'Boyle:
+    https://baoilleach.blogspot.com/2020/05/python-patterns-for-processing-large.html
 
     :param file: a filepath (str) or file-like object
     :param num_mols: number of raw sd-blocks to return per iteration
