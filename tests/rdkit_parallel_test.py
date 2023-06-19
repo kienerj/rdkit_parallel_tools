@@ -8,7 +8,7 @@ logger.addHandler(logging.StreamHandler())
 logger.setLevel(logging.INFO)
 
 
-class SDReaderTest(unittest.TestCase):
+class RDKitParallelTest(unittest.TestCase):
 
     NUM_MOLS_CDK2 = 47
 
