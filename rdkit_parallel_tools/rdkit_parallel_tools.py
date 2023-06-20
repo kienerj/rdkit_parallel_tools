@@ -120,6 +120,41 @@ def mol_to_sd(mol: Chem.Mol, additional_properties: dict = {}) -> str:
     return '\n'.join(sdf)
 
 
+def sd_to_sd_parallel_calculation(sd_file: io.TextIOBase, sd_output: str, calc_func, num_workers=-1):
+    """
+    Calculate in a streaming and multiprocessing fashion "calc_func" for all molecules in the passed-in sd-file.
+
+    `calc_func` must accept a single str argument where str is a sdf as string. It can contain one or more molecules.
+    The function can then iterate over the molecules by using a MolSupplier:
+
+    suppl = Chem.SDMolSupplier()
+    suppl.SetData(sdf)
+    for mol in suppl:
+        # do stuff here
+
+    The function must then return a sdf as a string containing all the molecules. It can contain additional properties
+    or changed coordinates like 3D coords + minimization. etc. whatever your calculation of interest is.
+
+    See `calc_descriptors_for_sd` as an example how such a function must look.
+
+    Note that the generated output file might have the molecules in different order.
+
+    :param sd_file: sdf containing the molecules
+    :param sd_output: output sd-file. gzipped if this ends with ".gz"
+    :param calc_func: the function to perform parallel calculation on
+    :param num_workers: how many processes to use, by default all available logical processors
+    """
+    if num_workers >= 0:
+        num_workers = multiprocessing.cpu_count()
+    # taken from https://stackoverflow.com/questions/56504405/just-one-with-open-file-as-f-based-on-a-conditional
+    opener = gzip.open if sd_output.endswith(".gz") else open
+    with multiprocessing.Pool(num_workers) as pool:
+        with opener(sd_output, "wt") as out:
+            miter = chunked_raw_sd_reader(sd_file)
+            for data in pool.imap_unordered(calc_func, miter):
+                out.write(data)
+
+
 def calc_descriptors_for_sd(sdf: str):
     """
     Calculate all descriptors for passed in molecules inside the sd-string and appends them as new properties to
@@ -148,11 +183,6 @@ def calculate_mol_descriptors(sd_file: io.TextIOBase, sd_output, num_workers=-1)
     :param sd_output: output sdf with all the calculated properties added to each molecule
     :param num_workers: how many processes to use, by default all available logical processors
     """
+    sd_to_sd_parallel_calculation(sd_file, sd_output, calc_func=calc_descriptors_for_sd, num_workers=num_workers)
 
-    if num_workers >= 0:
-        num_workers = multiprocessing.cpu_count()
-    with multiprocessing.Pool(num_workers) as pool:
-        with open(sd_output, "w") as out:
-            miter = chunked_raw_sd_reader(sd_file)
-            for data in pool.imap_unordered(calc_descriptors_for_sd, miter):
-                out.write(data)
+
