@@ -1,14 +1,20 @@
 import gzip
 import io
 import logging
+import multiprocessing
 from collections.abc import Iterable
+from pathlib import Path
+from rdkit import Chem
+from rdkit.Chem import Descriptors
 
-sdf_extensions = ("sdf", "sd", "SDF", "SD")
+sdf_extensions = (".sdf", ".sd", ".SDF", ".SD")
 logger = logging.getLogger('rdkit_parallel_tools')
 
 
 def input_to_file(file) -> io.IOBase:
     """
+    Convenience function to create file-like object.
+
     Handles different input for "file" and returns a file-like object
     Input must be a string pointing to a valid sd-file with a valid extension or gzipped sd-file (.gz) or already be
     an open file-like object (returned as-is)
@@ -22,31 +28,41 @@ def input_to_file(file) -> io.IOBase:
         elif file.endswith(".gz"):
             logger.debug("Found gzipped sd-file. Return file-like object")
             return gzip.open(file, "rt")
-    elif isinstance(file, io.BufferedIOBase):
+        else:
+            raise ValueError("Found file with invalid file extension.")
+    elif isinstance(file, Path):
+        if file.suffix in sdf_extensions:
+            logger.debug("Found sd-file. Return file-like object")
+            return file.open()
+        elif file.suffix == ".gz":
+            logger.debug("Found gzipped sd-file. Return file-like object")
+            return gzip.open(file, "rt")
+        else:
+            raise ValueError(f"Found file with invalid file extension {file.suffix}.")
+    elif isinstance(file, io.TextIOWrapper):
         # file like object, return as-is
         logger.debug("Found existing BufferedIOBase. Return as-is")
         return file
     else:
-        error_message = "Found input which is not a 'str' or valid file-like object."
+        error_message = f"Found input of type {type(file)} which is not a 'str' or valid file-like object."
         logger.error(error_message)
         raise ValueError(error_message)
 
 
-def raw_sd_reader(file) -> Iterable[str]:
+def raw_sd_reader(file: io.TextIOBase) -> Iterable[str]:
     """
-    Read an sd-file but return only raw sd-data as string and not a rdkit molecule instance.
+    Read a sd-file but return only raw sd-data as string and not a rdkit molecule instance.
 
-    :param file: a filepath (str) or file-like object
+    :param file: a file-like object
     :return: iterator that returns raw sd-block for each entry
     """
-    file = input_to_file(file)
+
     data = []
     for line in file:
         data.append(line)
         if line.startswith("$$$$"):
             yield "".join(data)
             data = []
-    file.close()
 
 
 def chunked_raw_sd_reader(file, num_mols: int = 100) -> Iterable[str]:
@@ -60,7 +76,7 @@ def chunked_raw_sd_reader(file, num_mols: int = 100) -> Iterable[str]:
     Code taken from below blog post from Noel O'Boyle:
     https://baoilleach.blogspot.com/2020/05/python-patterns-for-processing-large.html
 
-    :param file: a filepath (str) or file-like object
+    :param file: a file-like object
     :param num_mols: number of raw sd-blocks to return per iteration
     :return: list of raw sd-blocks of size num_mols
     """
@@ -76,3 +92,39 @@ def chunked_raw_sd_reader(file, num_mols: int = 100) -> Iterable[str]:
         tmp.append(sdf)
     # yield final chunk
     yield "".join(tmp)
+
+
+def calc_descriptors_for_sd(sdf: str):
+    """
+    Calculate all descriptors for passed in molecules inside the sd-string and appends them as new properties to
+    the sd-string for each molecule
+    :param sdf: a sdf string containing one or more molecules
+    :return: sd-string with calculates properties for each molecule added
+    """
+    ms = Chem.SDMolSupplier()
+    ms.SetData(sdf)
+    res = []
+    for m in ms:
+        desc = Descriptors.CalcMolDescriptors(m)
+        res.append(Chem.MolToMolBlock(m))
+        # append existing properties
+        for prop_name in m.GetPropNames():
+            value = m.GetProp(prop_name)
+            res.append(f">  <{prop_name}>\n{value}\n")
+        if desc is not None and len(desc) > 1:
+            # Append new properties to sd-file
+            for key, value in desc.items():
+                res.append(f">  <{key}>\n{value}\n")
+        res.append('$$$$')
+    return '\n'.join(res)
+
+
+def calculate_mol_descriptors(sd_file: io.TextIOBase, sd_output, num_workers=-1):
+
+    if num_workers == -1:
+        num_workers = multiprocessing.cpu_count()
+    with multiprocessing.Pool(num_workers) as pool:
+        with open(sd_output, "w") as out:
+            miter = chunked_raw_sd_reader(sd_file)
+            for data in pool.imap_unordered(calc_descriptors_for_sd, miter):
+                out.write(data)
