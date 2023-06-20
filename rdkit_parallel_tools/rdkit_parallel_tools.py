@@ -94,6 +94,28 @@ def chunked_raw_sd_reader(file, num_mols: int = 100) -> Iterable[str]:
     yield "".join(tmp)
 
 
+def mol_to_sd(mol: Chem.Mol, additional_properties: dict = {}) -> str:
+    """
+    Converts a molecule to an sd-string, eg molblock + all properties + optional additional properties to add not
+    stored in the mol object.
+
+    :param mol: the molecule
+    :param additional_properties:  optional additional properties to add to the sd file not already part of the mol
+    :return: molecule as sdf string
+    """
+    sdf = [Chem.MolToMolBlock(mol)]
+    # append existing properties
+    for prop_name in mol.GetPropNames():
+        value = mol.GetProp(prop_name)
+        sdf.append(f">  <{prop_name}>\n{value}\n")
+    if additional_properties is not None and len(additional_properties) > 1:
+        # Append new properties to sd-file
+        for key, value in additional_properties.items():
+            sdf.append(f">  <{key}>\n{value}\n")
+    sdf.append('$$$$')
+    return '\n'.join(sdf)
+
+
 def calc_descriptors_for_sd(sdf: str):
     """
     Calculate all descriptors for passed in molecules inside the sd-string and appends them as new properties to
@@ -106,16 +128,7 @@ def calc_descriptors_for_sd(sdf: str):
     res = []
     for m in ms:
         desc = Descriptors.CalcMolDescriptors(m)
-        res.append(Chem.MolToMolBlock(m))
-        # append existing properties
-        for prop_name in m.GetPropNames():
-            value = m.GetProp(prop_name)
-            res.append(f">  <{prop_name}>\n{value}\n")
-        if desc is not None and len(desc) > 1:
-            # Append new properties to sd-file
-            for key, value in desc.items():
-                res.append(f">  <{key}>\n{value}\n")
-        res.append('$$$$')
+        res.append(mol_to_sd(m, desc))
     return '\n'.join(res)
 
 
