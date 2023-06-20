@@ -41,6 +41,6 @@ class RDKitParallelTest(unittest.TestCase):
         self.assertEqual(len(mols), self.NUM_MOLS_CDK2, f"Output file contains unexpected amount of molecules. "
                                                         f"Found: {len(mols)}, Expected:{self.NUM_MOLS_CDK2}")
         m = mols[0]
-        mw = m.GetProp("MolWt", "MolWt property in first molecule not found.")
-        self.assertIsNotNone(mw)
+        mw = m.GetProp("MolWt")
+        self.assertIsNotNone(mw, "MolWt property in first molecule not found.")
 
