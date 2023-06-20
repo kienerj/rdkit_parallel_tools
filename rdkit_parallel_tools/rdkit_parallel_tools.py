@@ -13,11 +13,13 @@ logger = logging.getLogger('rdkit_parallel_tools')
 
 def input_to_file(file) -> io.IOBase:
     """
-    Convenience function to create file-like object.
+    Convenience function to create file-like object from different forms of input (str or Path, sdf for sdf.gz)
 
-    Handles different input for "file" and returns a file-like object
+    Handles different input for "file" and returns a file-like object.
+
     Input must be a string pointing to a valid sd-file with a valid extension or gzipped sd-file (.gz) or already be
-    an open file-like object (returned as-is)
+    a file-like object (io.TextIOBase) that is returned as-is.
+
     :param file: input to convert to a file-like object
     :return: file-like object
     """
@@ -39,7 +41,7 @@ def input_to_file(file) -> io.IOBase:
             return gzip.open(file, "rt")
         else:
             raise ValueError(f"Found file with invalid file extension {file.suffix}.")
-    elif isinstance(file, io.TextIOWrapper):
+    elif isinstance(file, io.TextIOBase):
         # file like object, return as-is
         logger.debug("Found existing BufferedIOBase. Return as-is")
         return file
@@ -53,10 +55,12 @@ def raw_sd_reader(file: io.TextIOBase) -> Iterable[str]:
     """
     Read a sd-file but return only raw sd-data as string and not a rdkit molecule instance.
 
+    Code adapted from below blog post from Noel O'Boyle:
+    https://baoilleach.blogspot.com/2020/05/python-patterns-for-processing-large.html
+
     :param file: a file-like object
     :return: iterator that returns raw sd-block for each entry
     """
-
     data = []
     for line in file:
         data.append(line)
@@ -133,8 +137,19 @@ def calc_descriptors_for_sd(sdf: str):
 
 
 def calculate_mol_descriptors(sd_file: io.TextIOBase, sd_output, num_workers=-1):
+    """
+    Calculate in a streaming and multiprocessing fashion all descriptors for all molecules in the passed-in sd-file.
 
-    if num_workers == -1:
+    Note that the generated output file might have the molecules in different order.
+
+    This function is meant for processing very large sd-files.
+
+    :param sd_file: sdf containing the molecules
+    :param sd_output: output sdf with all the calculated properties added to each molecule
+    :param num_workers: how many processes to use, by default all available logical processors
+    """
+
+    if num_workers >= 0:
         num_workers = multiprocessing.cpu_count()
     with multiprocessing.Pool(num_workers) as pool:
         with open(sd_output, "w") as out:
