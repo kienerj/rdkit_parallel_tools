@@ -3,6 +3,7 @@ import io
 import logging
 import multiprocessing
 from collections.abc import Iterable
+from typing import Callable, ContextManager
 from pathlib import Path
 from rdkit import Chem
 from rdkit.Chem import Descriptors
@@ -11,11 +12,10 @@ sdf_extensions = (".sdf", ".sd", ".SDF", ".SD")
 logger = logging.getLogger('rdkit_parallel_tools')
 
 
-def input_to_file(file) -> io.IOBase:
+def sd_input_to_file(file) -> io.IOBase:
     """
-    Convenience function to create file-like object from different forms of input (str or Path, sdf for sdf.gz)
-
-    Handles different input for "file" and returns a file-like object.
+    Convenience function to create file-like object from different forms of input (str or Path, sdf for sdf.gz) for
+    a sd-file.
 
     Input must be a string pointing to a valid sd-file with a valid extension or gzipped sd-file (.gz) or already be
     a file-like object (io.TextIOBase) that is returned as-is.
@@ -118,6 +118,31 @@ def mol_to_sd(mol: Chem.Mol, additional_properties: dict = {}) -> str:
             sdf.append(f">  <{key}>\n{value}\n")
     sdf.append('$$$$')
     return '\n'.join(sdf)
+
+
+def parallel_calculation(data_generator: Iterable[str], calc_func: Callable, data_writer: ContextManager, num_workers=-1):
+    """
+    Calculate in a streaming and multiprocessing fashion "calc_func" for all molecules in the passed-in data.
+
+    It is up to the caller to ensure the input functions are compatible.
+
+    data_reader must generate a string for each molecule which the calc_function can convert to a molecule.
+    calc_function must return the data in the way data_writer expects it (say as sdf or csv).
+    data_writer is a ContextManager that must return an object which has a "write" method.
+
+    Note that the generated output might have the molecules in different order than in input.
+
+    :param data_generator: function that reads the molecules (one at a time or in blocks)
+    :param calc_func: the function to perform parallel calculation on
+    :param data_writer: function that generates output file
+    :param num_workers: how many processes to use, by default all available logical processors
+    """
+    if num_workers >= 0:
+        num_workers = multiprocessing.cpu_count()
+    with multiprocessing.Pool(num_workers) as pool:
+        with data_writer() as writer:
+            for data in pool.imap_unordered(calc_func, data_generator):
+                writer.write(data)
 
 
 def sd_to_sd_parallel_calculation(sd_file: io.TextIOBase, sd_output: str, calc_func, num_workers=-1):
