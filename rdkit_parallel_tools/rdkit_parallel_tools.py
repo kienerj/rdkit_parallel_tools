@@ -7,6 +7,7 @@ from typing import Callable, ContextManager
 from pathlib import Path
 from rdkit import Chem
 from rdkit.Chem import Descriptors
+from rich.progress import track
 
 sdf_extensions = (".sdf", ".sd", ".SDF", ".SD")
 logger = logging.getLogger('rdkit_parallel_tools')
@@ -144,7 +145,7 @@ def parallel_calculation(data_generator: Iterable[str], calc_func: Callable, dat
         num_workers = multiprocessing.cpu_count()
     with multiprocessing.Pool(num_workers) as pool:
         with data_writer() as writer:
-            for data in pool.imap_unordered(calc_func, data_generator):
+            for data in track(pool.imap_unordered(calc_func, data_generator), description="Calculating..."):
                 writer.write(data)
 
 
@@ -179,7 +180,7 @@ def sd_to_sd_parallel_calculation(sd_file: io.TextIOBase, sd_output: str, calc_f
     with multiprocessing.Pool(num_workers) as pool:
         with opener(sd_output, "wt") as out:
             miter = chunked_raw_sd_reader(sd_file)
-            for data in pool.imap_unordered(calc_func, miter):
+            for data in track(pool.imap_unordered(calc_func, miter), description="Calculating..."):
                 out.write(data)
 
 

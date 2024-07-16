@@ -4,4 +4,5 @@ channels:
 dependencies:
   - python>=3.11
   - rdkit>=2023.03.1
+  - rich
   - pip
