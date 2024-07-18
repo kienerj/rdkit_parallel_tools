@@ -27,7 +27,7 @@ def your_custom_fn(sdf: str) -> str:
 
 
 # convert different types of input to proper file-like object
-sd_file = sd_input_to_file("path/to/in.sdf.gz")
+sd_file = chem_input_to_file("path/to/in.sdf.gz")
 
 # Reads sdf in streaming fashion, performs desired calculation on all cpu cores 
 # and writes results to gzipped sdf.

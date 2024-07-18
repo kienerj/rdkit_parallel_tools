@@ -9,42 +9,48 @@ from rdkit import Chem
 from rdkit.Chem import Descriptors
 from rich.progress import track
 
-sdf_extensions = (".sdf", ".sd", ".SDF", ".SD")
+chem_file_extensions = (".sdf", ".sd", ".SDF", ".SD", ".smi", ".txt", ".smiles")
 logger = logging.getLogger('rdkit_parallel_tools')
 
+# make duckdb optional
+try:
+    import duckdb
+except ImportError:
+    logger.warning("duckdb is not installed, can't use DuckDbWriter.")
 
-def sd_input_to_file(file) -> io.IOBase:
+
+def chem_input_to_file(file) -> io.IOBase:
     """
-    Convenience function to create file-like object from different forms of input (str or Path, sdf for sdf.gz) for
-    a sd-file.
+    Convenience function to create file-like object from different forms of input (str or Path, sdf, sdf.gz, smi, smi.gz)
+    for a molecule containing file (smiles or sdf)
 
-    Input must be a string pointing to a valid sd-file with a valid extension or gzipped sd-file (.gz) or already be
-    a file-like object (io.TextIOBase) that is returned as-is.
+    Input must be a string pointing to a valid file with a valid extension or gzipped file (.gz) or already be a
+    file-like object (io.TextIOBase) that is returned as-is.
 
     :param file: input to convert to a file-like object
     :return: file-like object
     """
     if isinstance(file, str):
-        if file.endswith(sdf_extensions):
-            logger.debug("Found sd-file. Return file-like object")
+        if file.endswith(chem_file_extensions):
+            logger.debug(f"Found a {file.endswith()}. Return file-like object")
             return open(file)
         elif file.endswith(".gz"):
-            logger.debug("Found gzipped sd-file. Return file-like object")
+            logger.debug("Found gzipped file. Return file-like object")
             return gzip.open(file, "rt")
         else:
-            raise ValueError("Found file with invalid file extension.")
+            raise ValueError(f"Found file with unsupported file extension {file.endswith()}.")
     elif isinstance(file, Path):
-        if file.suffix in sdf_extensions:
-            logger.debug("Found sd-file. Return file-like object")
+        if file.suffix in chem_file_extensions:
+            logger.debug(f"Found file with extension {file.suffix}. Return file-like object")
             return file.open()
         elif file.suffix == ".gz":
-            logger.debug("Found gzipped sd-file. Return file-like object")
+            logger.debug("Found gzipped file. Return file-like object")
             return gzip.open(file, "rt")
         else:
             raise ValueError(f"Found file with invalid file extension {file.suffix}.")
     elif isinstance(file, io.TextIOBase):
         # file like object, return as-is
-        logger.debug("Found existing BufferedIOBase. Return as-is")
+        logger.debug("Found existing TextIOBase. Return as-is")
         return file
     else:
         error_message = f"Found input of type {type(file)} which is not a 'str' or valid file-like object."
@@ -122,7 +128,7 @@ def mol_to_sd(mol: Chem.Mol, additional_properties: dict = {}) -> str:
 
 
 def parallel_calculation(data_generator: Iterable[str], calc_func: Callable, data_writer: ContextManager,
-                         num_workers: int = -1):
+                         data_writer_args: tuple = None, data_writer_kwargs: dict = None, num_workers: int = -1):
     """
     Calculate in a streaming and multiprocessing fashion "calc_func" for all molecules in the passed-in data.
 
@@ -139,12 +145,18 @@ def parallel_calculation(data_generator: Iterable[str], calc_func: Callable, dat
     :param data_generator: function that reads the molecules (one at a time or in blocks)
     :param calc_func: the function to perform parallel calculation on
     :param data_writer: function that generates output file
+    :param data_writer_args: positional arguments to pass to the data_writer
+    :param data_writer_kwargs: keyword arguments to pass to the data_writer
     :param num_workers: how many processes to use, by default all available logical processors
     """
     if num_workers <= 0:
         num_workers = multiprocessing.cpu_count()
+    if data_writer_kwargs is None:
+        data_writer_kwargs = {}
+    if data_writer_args is None:
+        data_writer_args = ()
     with multiprocessing.Pool(num_workers) as pool:
-        with data_writer() as writer:
+        with data_writer(*data_writer_args, **data_writer_kwargs) as writer:
             for data in track(pool.imap_unordered(calc_func, data_generator), description="Calculating..."):
                 writer.write(data)
 
@@ -215,3 +227,68 @@ def calculate_mol_descriptors(sd_file: io.TextIOBase, sd_output, num_workers=-1)
     sd_to_sd_parallel_calculation(sd_file, sd_output, calc_func=calc_descriptors_for_sd, num_workers=num_workers)
 
 
+class SmilesWriterWrapper:
+    """
+    A Context Manager Wrapper around rdkit.Chem.SmilesWriter to be used in parallel_calculation function to write the
+    molecules as SMILES. Same as with SmilesWriter, to avoid output of molecule name you need to set nameHeader="".
+
+    This example just reads and then writes out the SMILES again but explains the intended usage.
+
+    smi_file = "simple_test.smi"
+    out_smi = "out.smi"
+    with open(smi_file, "r") as f:
+        parallel_calculation(f, to_rdkit, SmilesWriterWrapper, data_writer_args=(out_smi,),
+                             data_writer_kwargs={"includeHeader": False}, num_workers=1)
+    """
+
+    def __init__(self, file, delimiter=" ", nameHeader="Name", includeHeader=True, isomericSmiles=True,
+                 kekuleSmiles=False):
+        self.writer = Chem.SmilesWriter(file, delimiter, nameHeader, includeHeader, isomericSmiles, kekuleSmiles)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
+    def write(self, mol):
+        """
+        Write the molecule or list of molecules to a SMILES file.
+        :param mol: rdkit molecule to write
+        """
+        if isinstance(mol, Chem.Mol):
+            self.writer.write(mol)
+        elif isinstance(mol, list):
+            for mol in mol:
+                self.writer.write(mol)
+        else:
+            raise ValueError(f"Expected rdkit mol or list of mols, but got {type(mol)}.")
+
+
+class DuckDBWriter:
+    """
+    Proof-of-Concept how to write results directly to a database
+
+    Here great care need to be taken that the calculation function returns the columns in the correct order, the
+    same order as the column order of the table and all columns must be present.
+    """
+
+    def __init__(self, database, prepared_statement):
+        self.con = duckdb.connect(database = database, read_only = False)
+        self.prepared_statement = prepared_statement
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.con.close()
+        return False
+
+    def write(self, data):
+        if not isinstance(data, list):
+            raise ValueError(f"Data must be a list of values to insert but got {data} instead")
+        if isinstance(data[0], list):
+            # assumption: list of list, multiple inserts
+            self.con.executemany(self.prepared_statement, data)
+        else:
+            self.con.execute(self.prepared_statement, data)
