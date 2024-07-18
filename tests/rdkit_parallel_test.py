@@ -12,6 +12,7 @@ logger.setLevel(logging.INFO)
 class RDKitParallelTest(unittest.TestCase):
 
     NUM_MOLS_CDK2 = 47
+    NUM_SMILES_IN_FILE = 4
 
     def setUp(self):
         self.data_dir = os.environ["CONDA_PREFIX"] + "/Library/share/RDKit/Docs/Book/data"
@@ -44,6 +45,13 @@ class RDKitParallelTest(unittest.TestCase):
         m = mols[0]
         mw = m.GetProp("MolWt")
         self.assertIsNotNone(mw, "MolWt property in first molecule not found.")
+
+    def test_chunked_smiles_reader(self):
+
+        f = chem_input_to_file(r"files/simple_test.smi")
+        g = chunked_smiles_reader(f)
+        c = g.__next__()
+        self.assertTrue(len(c) == self.NUM_SMILES_IN_FILE, f"Expected 4 results but got {len(c)}")
 
     def test_smiles_processing(self):
         # Doesn't really test anything but keeping it here as proof-of-concept

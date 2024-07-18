@@ -32,7 +32,7 @@ def chem_input_to_file(file) -> io.IOBase:
     """
     if isinstance(file, str):
         if file.endswith(chem_file_extensions):
-            logger.debug(f"Found a {file.endswith()}. Return file-like object")
+            logger.debug(f"Found a {Path(file).suffix}. Return file-like object")
             return open(file)
         elif file.endswith(".gz"):
             logger.debug("Found gzipped file. Return file-like object")
@@ -103,6 +103,27 @@ def chunked_raw_sd_reader(file, num_mols: int = 100) -> Iterable[str]:
         tmp.append(sdf)
     # yield final chunk
     yield "".join(tmp)
+
+
+def chunked_smiles_reader(file: io.TextIOBase, chunk_size=100):
+    """
+    Generator for reading a text file containing SMILES and return them in chunks for further processing
+
+    :param file: a file-like object
+    :param chunk_size: nummber of SMILES/molecules to return per chunk
+    :return: list of SMILES of length chunk_size
+    """
+    chunk = []
+    i = 0
+    for line in file:
+        if i == chunk_size:
+            yield chunk
+            chunk = []
+            i = 0
+        i += 1
+        chunk.append(line)
+    # yield final chunk
+    yield chunk
 
 
 def mol_to_sd(mol: Chem.Mol, additional_properties: dict = {}) -> str:
