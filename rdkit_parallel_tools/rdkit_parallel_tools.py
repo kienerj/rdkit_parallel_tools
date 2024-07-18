@@ -68,6 +68,8 @@ def raw_sd_reader(file: io.TextIOBase) -> Iterable[str]:
     :param file: a file-like object
     :return: iterator that returns raw sd-block for each entry
     """
+    if not isinstance(file, io.TextIOBase):
+        raise ValueError(f"Expected file-like object (TextIOBase) but got {type(file)}.")
     data = []
     for line in file:
         data.append(line)
@@ -91,6 +93,8 @@ def chunked_raw_sd_reader(file, num_mols: int = 100) -> Iterable[str]:
     :param num_mols: number of raw sd-blocks to return per iteration
     :return: list of raw sd-blocks of size num_mols
     """
+    if not isinstance(file, io.TextIOBase):
+        raise ValueError(f"Expected file-like object (TextIOBase) but got {type(file)}.")
     reader = raw_sd_reader(file)
     tmp = []
     i = 0
@@ -102,10 +106,11 @@ def chunked_raw_sd_reader(file, num_mols: int = 100) -> Iterable[str]:
         i += 1
         tmp.append(sdf)
     # yield final chunk
+    file.close()
     yield "".join(tmp)
 
 
-def chunked_smiles_reader(file: io.TextIOBase, chunk_size=100):
+def chunked_smiles_reader(file: io.TextIOBase, chunk_size=100) -> Iterable[str]:
     """
     Generator for reading a text file containing SMILES and return them in chunks for further processing
 
@@ -113,6 +118,8 @@ def chunked_smiles_reader(file: io.TextIOBase, chunk_size=100):
     :param chunk_size: nummber of SMILES/molecules to return per chunk
     :return: list of SMILES of length chunk_size
     """
+    if not isinstance(file, io.TextIOBase):
+        raise ValueError(f"Expected file-like object (TextIOBase) but got {type(file)}.")
     chunk = []
     i = 0
     for line in file:
@@ -123,6 +130,7 @@ def chunked_smiles_reader(file: io.TextIOBase, chunk_size=100):
         i += 1
         chunk.append(line)
     # yield final chunk
+    file.close()
     yield chunk
 
 
@@ -272,18 +280,18 @@ class SmilesWriterWrapper:
     def __exit__(self, exc_type, exc_val, exc_tb):
         return False
 
-    def write(self, mol):
+    def write(self, data):
         """
         Write the molecule or list of molecules to a SMILES file.
-        :param mol: rdkit molecule to write
+        :param data: rdkit molecule to write
         """
-        if isinstance(mol, Chem.Mol):
-            self.writer.write(mol)
-        elif isinstance(mol, list):
-            for mol in mol:
+        if isinstance(data, Chem.Mol):
+            self.writer.write(data)
+        elif isinstance(data, list):
+            for mol in data:
                 self.writer.write(mol)
         else:
-            raise ValueError(f"Expected rdkit mol or list of mols, but got {type(mol)}.")
+            raise ValueError(f"Expected rdkit mol or list of mols, but got {type(data)}.")
 
 
 class DuckDBWriter:

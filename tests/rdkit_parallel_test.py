@@ -66,9 +66,9 @@ class RDKitParallelTest(unittest.TestCase):
     def test_parallel_calculation_smiles(self):
         smi_file = r"files/simple_test.smi"
         out_smi = r"files/out.smi"
-        with open(smi_file, "r") as f:
-            parallel_calculation(f, smiles_to_rdkit, SmilesWriterWrapper, data_writer_args=(out_smi,),
-                                 data_writer_kwargs={"includeHeader": False, "nameHeader": ""}, num_workers=1)
+        g = chunked_smiles_reader(chem_input_to_file(smi_file))
+        parallel_calculation(g, smiles_to_rdkit, SmilesWriterWrapper, data_writer_args=(out_smi,),
+                             data_writer_kwargs={"includeHeader": False, "nameHeader": ""}, num_workers=1)
         mols = []
         with open(out_smi, "r") as o:
             for l in o:
@@ -125,9 +125,18 @@ class RDKitParallelTest(unittest.TestCase):
             os.remove(db_file)
 
 
-def smiles_to_rdkit(smiles: str):
-    mol = Chem.MolFromSmiles(smiles)
-    return mol
+def smiles_to_rdkit(smiles):
+    if isinstance(smiles, str):
+        mol = Chem.MolFromSmiles(smiles)
+        return mol
+    elif isinstance(smiles, list):
+        r = []
+        for s in smiles:
+            mol = Chem.MolFromSmiles(s)
+            r.append(mol)
+        return r
+    else:
+        raise ValueError("smiles must be a string or list of strings.")
 
 
 def smiles_to_list(smiles: str):
